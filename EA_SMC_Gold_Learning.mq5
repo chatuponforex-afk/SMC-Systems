@@ -192,14 +192,19 @@ int OnInit()
    trade.SetDeviationInPoints(Slippage_Points);
    trade.SetTypeFillingBySymbol(_Symbol);
    
-   // NEW: Initialize log file - FIXED: Use TimeYear, TimeMonth, TimeDay
+   // NEW: Initialize log file - FIXED: Simple approach
    if(Enable_Pattern_Logging)
    {
       datetime current_time = TimeCurrent();
-      g_log_filename = "SMC_Patterns_" + _Symbol + "_" + 
-                       IntegerToString(TimeYear(current_time)) + 
-                       StringFormat("%02d", TimeMonth(current_time)) + 
-                       StringFormat("%02d", TimeDay(current_time)) + ".csv";
+      int year = TimeYear(current_time);
+      int month = TimeMonth(current_time);
+      int day = TimeDay(current_time);
+      
+      string year_str = IntegerToString(year);
+      string month_str = (month < 10) ? "0" + IntegerToString(month) : IntegerToString(month);
+      string day_str = (day < 10) ? "0" + IntegerToString(day) : IntegerToString(day);
+      
+      g_log_filename = "SMC_Patterns_" + _Symbol + "_" + year_str + month_str + day_str + ".csv";
       WritePatternHeader();
    }
    
