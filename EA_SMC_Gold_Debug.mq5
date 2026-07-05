@@ -5,7 +5,7 @@
 //+------------------------------------------------------------------+
 #property copyright "SMC Gold EA - Debug"
 #property link      ""
-#property version   "1.01"
+#property version   "1.02"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -66,8 +66,6 @@ input bool          Use_Push             = true;
 
 input group "== DEBUG Dashboard =="
 input bool          Show_Dashboard       = true;
-input int           Dashboard_X          = 10;
-input int           Dashboard_Y          = 50;
 
 //====================================================================
 // DATA STRUCTURES
@@ -116,33 +114,11 @@ int      g_hSMC_M15               = INVALID_HANDLE;
 int      g_hSMC_H4                = INVALID_HANDLE;
 HistorySyncStatus g_historySync;
 
-string g_dashboard_label = "SMC_Dashboard";
 int g_tick_counter = 0;
 
 //====================================================================
-// DASHBOARD FUNCTIONS
+// DASHBOARD FUNCTIONS - Using Comment()
 //====================================================================
-
-void CreateDashboard()
-{
-   ObjectDelete(0, g_dashboard_label);
-   
-   if(!Show_Dashboard) return;
-   
-   if(ObjectCreate(0, g_dashboard_label, OBJ_LABEL, 0, 0, 0))
-   {
-      ObjectSetInteger(0, g_dashboard_label, OBJPROP_XDISTANCE, Dashboard_X);
-      ObjectSetInteger(0, g_dashboard_label, OBJPROP_YDISTANCE, Dashboard_Y);
-      ObjectSetInteger(0, g_dashboard_label, OBJPROP_CORNER, CORNER_LEFT_UPPER);
-      ObjectSetInteger(0, g_dashboard_label, OBJPROP_ANCHOR, ANCHOR_LEFT_UPPER);
-      ObjectSetInteger(0, g_dashboard_label, OBJPROP_FONTSIZE, 9);
-      ObjectSetString(0, g_dashboard_label, OBJPROP_FONT, "Courier New");
-      ObjectSetInteger(0, g_dashboard_label, OBJPROP_COLOR, clrLime);
-      ObjectSetInteger(0, g_dashboard_label, OBJPROP_BACK, false);
-      ObjectSetInteger(0, g_dashboard_label, OBJPROP_SELECTABLE, false);
-      ObjectSetInteger(0, g_dashboard_label, OBJPROP_HIDDEN, true);
-   }
-}
 
 void UpdateDashboard(string m15_signal_text, string h4_signal_text, string pa_pattern_text, 
                      string rr_ratio_text, string mtf_check_text, string entry_reason_text)
@@ -163,7 +139,48 @@ void UpdateDashboard(string m15_signal_text, string h4_signal_text, string pa_pa
    dashboard_text += "MTF CHECK:  " + mtf_check_text + "\n";
    dashboard_text += "ENTRY:      " + entry_reason_text + "\n";
    
-   ObjectSetString(0, g_dashboard_label, OBJPROP_TEXT, dashboard_text);
+   Comment(dashboard_text);
+}
+
+//====================================================================
+// ALERT FUNCTIONS
+//====================================================================
+
+void AlertSignal(bool isBuy, string pa_pattern, double rr_ratio)
+{
+   string alert_msg = StringFormat(
+      "[SMC GOLD EA] SIGNAL DETECTED!\n"
+      "Direction: %s\n"
+      "PA Pattern: %s\n"
+      "RR Ratio: %.2f:1\n"
+      "Status: READY TO ENTER",
+      isBuy ? "BUY" : "SELL",
+      pa_pattern,
+      rr_ratio
+   );
+   
+   if(Use_Alert) Alert(alert_msg);
+   if(Use_Push) SendNotification(alert_msg);
+}
+
+void AlertEntry(bool isBuy, double entry_price, double sl_price, double tp_price, double lot)
+{
+   string entry_msg = StringFormat(
+      "[SMC GOLD EA] TRADE ENTRY EXECUTED!\n"
+      "Direction: %s\n"
+      "Entry: %.5f\n"
+      "SL: %.5f\n"
+      "TP: %.5f\n"
+      "Lot: %.2f",
+      isBuy ? "BUY" : "SELL",
+      entry_price,
+      sl_price,
+      tp_price,
+      lot
+   );
+   
+   if(Use_Alert) Alert(entry_msg);
+   if(Use_Push) SendNotification(entry_msg);
 }
 
 //====================================================================
@@ -258,8 +275,6 @@ int OnInit()
    }
    Print("OK: H4 Indicator Loaded");
    
-   CreateDashboard();
-   
    Print("OK: All Indicators Loaded Successfully");
    Print("==================================================================\n");
    return(INIT_SUCCEEDED);
@@ -272,7 +287,7 @@ void OnDeinit(const int reason)
    if(g_hSMC_H4 != INVALID_HANDLE)
       IndicatorRelease(g_hSMC_H4);
    
-   ObjectDelete(0, g_dashboard_label);
+   Comment("");
    Print("EA_SMC_Gold Stopped");
 }
 
@@ -461,13 +476,6 @@ bool IsPriceInH4POI(bool isBuy, double &h4_top, double &h4_bottom)
    return(false);
 }
 
-void NotifyUser(string msg)
-{
-   Print(msg);
-   if(Use_Alert) Alert(msg);
-   if(Use_Push)  SendNotification(msg);
-}
-
 //====================================================================
 // ORDER MANAGEMENT
 //====================================================================
@@ -545,8 +553,8 @@ void OpenPOITrade(bool isBuy, double top, double bottom, double tp, datetime ori
    if(ok)
    {
       g_groups[n].ticket = trade.ResultOrder();
-      NotifyUser(StringFormat("ENTRY: %s | Entry=%.5f SL=%.5f TP=%.5f Lot=%.2f",
-                              isBuy ? "BUY" : "SELL", entry_price, sl_price, tp, lot));
+      AlertEntry(isBuy, entry_price, sl_price, tp, lot);
+      Print("ENTRY: ", (isBuy ? "BUY" : "SELL"), " | Entry=", entry_price, " SL=", sl_price, " TP=", tp, " Lot=", lot);
    }
    else
    {
@@ -632,6 +640,7 @@ void OnTick()
    
    // RR Ratio Calculation
    string rr_text = "WAITING";
+   double rr_ratio = 0;
    if(m15_signal != 0 && m15_bottom > 0 && m15_top > 0)
    {
       double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
@@ -640,7 +649,7 @@ void OnTick()
       double sl_price = (m15_signal == 1) ? (m15_bottom - sl_buffer) : (m15_top + sl_buffer);
       double risk_dist = MathAbs(entry_price - sl_price);
       double reward_dist = MathAbs(m15_tp - entry_price);
-      double rr_ratio = (risk_dist > 0) ? (reward_dist / risk_dist) : 0;
+      rr_ratio = (risk_dist > 0) ? (reward_dist / risk_dist) : 0;
       
       string rr_status = (rr_ratio >= Target_RR) ? "OK" : "LOW";
       rr_text = StringFormat("%s %.2f:1 (Need: %.1f:1)", rr_status, rr_ratio, Target_RR);
@@ -699,6 +708,8 @@ void OnTick()
    if(m15_signal != 0 && m15_origin != 0 && entry_reason == "READY")
    {
       bool isBuy = (m15_signal == 1);
+      PAPattern pattern = AnalyzePriceActionCandle(1);
+      AlertSignal(isBuy, pattern.pattern_name, rr_ratio);
       OpenPOITrade(isBuy, m15_top, m15_bottom, m15_tp, m15_origin);
       g_lastSignalProcessed = m15_origin;
       Print("=== TRADE ENTRY EXECUTED ===");
