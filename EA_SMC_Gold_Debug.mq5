@@ -1,11 +1,12 @@
 //+------------------------------------------------------------------+
 //|                                      EA_SMC_Gold_Debug.mq5       |
-//|  Smart Money Concepts (SMC) Expert Advisor - DEBUG VERSION        |
+//|  Smart Money Concepts (SMC) Expert Advisor - DEBUG VERSION 2      |
 //|  Multi-Timeframe (MTF) Trading System with Dashboard              |
+//|  RELAXED PA PATTERNS + CURRENT BAR + DEBUG LOGS                   |
 //+------------------------------------------------------------------+
-#property copyright "SMC Gold EA - Debug"
+#property copyright "SMC Gold EA - Debug v2"
 #property link      ""
-#property version   "1.02"
+#property version   "2.00"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -47,15 +48,16 @@ input ENUM_TIMEFRAMES Execution_TF       = PERIOD_M15;
 input bool          Use_MTF_Alignment    = true;
 
 input group "== Risk Management & Entry =="
-input double        Target_RR            = 3.0;
+input double        Target_RR            = 2.5;  // RELAXED from 3.0
 input int           Inp_SL_Buffer        = 300;
 input double        Breakeven_RR_Trigger = 2.0;
 input bool          Require_PA_Confirmation = true;
 
-input group "== Price Action Patterns =="
-input int           PA_Min_Lower_Wick_Points = 30;
-input int           PA_Min_Upper_Wick_Points = 30;
-input double        PA_Engulfing_Ratio      = 0.7;
+input group "== Price Action Patterns (RELAXED) =="
+input int           PA_Min_Lower_Wick_Points = 20;   // RELAXED from 30
+input int           PA_Min_Upper_Wick_Points = 20;   // RELAXED from 30
+input double        PA_Engulfing_Ratio      = 0.6;   // RELAXED from 0.7
+input bool          Allow_Inside_Bar        = false; // Allow bar inside zone
 
 input group "== Order Management =="
 input int           Magic_Number         = 20260704;
@@ -66,6 +68,7 @@ input bool          Use_Push             = true;
 
 input group "== DEBUG Dashboard =="
 input bool          Show_Dashboard       = true;
+input bool          Show_Debug_Logs      = true;
 
 //====================================================================
 // DATA STRUCTURES
@@ -115,6 +118,7 @@ int      g_hSMC_H4                = INVALID_HANDLE;
 HistorySyncStatus g_historySync;
 
 int g_tick_counter = 0;
+int g_check_counter = 0;
 
 //====================================================================
 // DASHBOARD FUNCTIONS - Using Comment()
@@ -142,6 +146,15 @@ void UpdateDashboard(string m15_signal_text, string h4_signal_text, string pa_pa
    Comment(dashboard_text);
 }
 
+void DebugLog(string msg)
+{
+   if(Show_Debug_Logs)
+   {
+      g_check_counter++;
+      Print("[CHECK #", g_check_counter, "] ", msg);
+   }
+}
+
 //====================================================================
 // ALERT FUNCTIONS
 //====================================================================
@@ -159,6 +172,7 @@ void AlertSignal(bool isBuy, string pa_pattern, double rr_ratio)
       rr_ratio
    );
    
+   DebugLog("ALERT TRIGGERED: " + alert_msg);
    if(Use_Alert) Alert(alert_msg);
    if(Use_Push) SendNotification(alert_msg);
 }
@@ -239,7 +253,8 @@ int OnInit()
    trade.SetTypeFillingBySymbol(_Symbol);
    
    Print("\n\n");
-   Print("================== EA_SMC_Gold DEBUG STARTING ==================");
+   Print("================== EA_SMC_Gold DEBUG v2 STARTING ==================");
+   Print("VERSION: 2.00 - RELAXED PA + CURRENT BAR + DEBUG");
    
    if(!CheckAndDownloadHistory())
    {
@@ -276,7 +291,7 @@ int OnInit()
    Print("OK: H4 Indicator Loaded");
    
    Print("OK: All Indicators Loaded Successfully");
-   Print("==================================================================\n");
+   Print("=====================================================================\n");
    return(INIT_SUCCEEDED);
 }
 
@@ -292,7 +307,7 @@ void OnDeinit(const int reason)
 }
 
 //====================================================================
-// PRICE ACTION ANALYSIS
+// PRICE ACTION ANALYSIS (RELAXED VERSION)
 //====================================================================
 
 PAPattern AnalyzePriceActionCandle(int shift)
@@ -316,7 +331,11 @@ PAPattern AnalyzePriceActionCandle(int shift)
    double lower_wick = (close > open) ? (open - low) : (close - low);
    double upper_wick = (close > open) ? (high - close) : (high - open);
    
+   DebugLog(StringFormat("PA Check [Shift %d]: Body=%.0f Range=%.0f LowerWick=%.0f UpperWick=%.0f",
+            shift, candle_body, full_range, lower_wick, upper_wick));
+   
    // BULLISH PATTERNS
+   // 1. Bullish Engulfing (RELAXED)
    if(shift > 0)
    {
       double prev_open  = iOpen(_Symbol, PERIOD_M15, shift + 1);
@@ -331,11 +350,13 @@ PAPattern AnalyzePriceActionCandle(int shift)
             pattern.pattern_type = 1;
             pattern.pattern_name = "BULLISH ENGULFING";
             pattern.close_ratio = (close - open) / full_range;
+            DebugLog("PA MATCH: Bullish Engulfing (Ratio=" + DoubleToString(engulf_ratio, 2) + ")");
             return(pattern);
          }
       }
    }
    
+   // 2. Hammer (RELAXED)
    if(close > open && lower_wick > candle_body * 1.5 && upper_wick < candle_body * 0.5)
    {
       if(lower_wick > PA_Min_Lower_Wick_Points * point)
@@ -344,11 +365,13 @@ PAPattern AnalyzePriceActionCandle(int shift)
          pattern.pattern_type = 2;
          pattern.pattern_name = "HAMMER";
          pattern.lower_wick_ratio = lower_wick / full_range;
+         DebugLog("PA MATCH: Hammer (LowerWick=" + DoubleToString(pattern.lower_wick_ratio * 100, 1) + "%)");
          return(pattern);
       }
    }
    
-   if(close > open && lower_wick > candle_body * 2.0)
+   // 3. Pinbar (RELAXED)
+   if(close > open && lower_wick > candle_body * 1.5)
    {
       if(lower_wick > PA_Min_Lower_Wick_Points * point)
       {
@@ -356,11 +379,13 @@ PAPattern AnalyzePriceActionCandle(int shift)
          pattern.pattern_type = 3;
          pattern.pattern_name = "PINBAR (Lower Wick)";
          pattern.lower_wick_ratio = lower_wick / full_range;
+         DebugLog("PA MATCH: Pinbar LowerWick (Ratio=" + DoubleToString(pattern.lower_wick_ratio * 100, 1) + "%)");
          return(pattern);
       }
    }
    
    // BEARISH PATTERNS
+   // 4. Bearish Engulfing (RELAXED)
    if(shift > 0)
    {
       double prev_open  = iOpen(_Symbol, PERIOD_M15, shift + 1);
@@ -375,11 +400,13 @@ PAPattern AnalyzePriceActionCandle(int shift)
             pattern.pattern_type = 4;
             pattern.pattern_name = "BEARISH ENGULFING";
             pattern.close_ratio = (open - close) / full_range;
+            DebugLog("PA MATCH: Bearish Engulfing (Ratio=" + DoubleToString(engulf_ratio, 2) + ")");
             return(pattern);
          }
       }
    }
    
+   // 5. Shooting Star (RELAXED)
    if(close < open && upper_wick > candle_body * 1.5 && lower_wick < candle_body * 0.5)
    {
       if(upper_wick > PA_Min_Upper_Wick_Points * point)
@@ -388,6 +415,7 @@ PAPattern AnalyzePriceActionCandle(int shift)
          pattern.pattern_type = 5;
          pattern.pattern_name = "SHOOTING STAR";
          pattern.upper_wick_ratio = upper_wick / full_range;
+         DebugLog("PA MATCH: Shooting Star (UpperWick=" + DoubleToString(pattern.upper_wick_ratio * 100, 1) + "%)");
          return(pattern);
       }
    }
@@ -397,16 +425,31 @@ PAPattern AnalyzePriceActionCandle(int shift)
 
 bool IsPriceActionConfirmed(bool isBuy, double poi_top, double poi_bottom, int bar_shift)
 {
-   if(!Require_PA_Confirmation) return(true);
+   if(!Require_PA_Confirmation) 
+   {
+      DebugLog("PA Confirmation: DISABLED");
+      return(true);
+   }
    
    double close = iClose(_Symbol, PERIOD_M15, bar_shift);
    bool inside_zone = (close >= poi_bottom && close <= poi_top);
    
-   if(!inside_zone) return(false);
+   DebugLog(StringFormat("Price Inside Zone Check: Close=%.2f POI[%.2f-%.2f] = %s",
+            close, poi_bottom, poi_top, inside_zone ? "YES" : "NO"));
+   
+   if(!inside_zone) 
+   {
+      DebugLog("PA FAIL: Price not inside POI zone");
+      return(false);
+   }
    
    PAPattern pattern = AnalyzePriceActionCandle(bar_shift);
    
-   if(!pattern.is_valid) return(false);
+   if(!pattern.is_valid) 
+   {
+      DebugLog("PA FAIL: No valid pattern detected");
+      return(false);
+   }
    
    if(isBuy && (pattern.pattern_type == 1 || pattern.pattern_type == 2 || pattern.pattern_type == 3))
       return(true);
@@ -414,6 +457,7 @@ bool IsPriceActionConfirmed(bool isBuy, double poi_top, double poi_bottom, int b
    if(!isBuy && (pattern.pattern_type == 4 || pattern.pattern_type == 5))
       return(true);
    
+   DebugLog("PA FAIL: Pattern type mismatch (isBuy=" + (isBuy ? "YES" : "NO") + " type=" + IntegerToString(pattern.pattern_type) + ")");
    return(false);
 }
 
@@ -526,7 +570,8 @@ void OpenPOITrade(bool isBuy, double top, double bottom, double tp, datetime ori
    
    if(risk_dist <= 0 || reward_dist / risk_dist < Target_RR)
    {
-      Print("SKIP: Trade Skipped (RR Insufficient: ", DoubleToString(risk_dist > 0 ? reward_dist / risk_dist : 0, 2), ")");
+      DebugLog(StringFormat("SKIP: RR Insufficient (%.2f:1 < %.1f:1)", 
+               risk_dist > 0 ? reward_dist / risk_dist : 0, Target_RR));
       return;
    }
    
@@ -554,11 +599,12 @@ void OpenPOITrade(bool isBuy, double top, double bottom, double tp, datetime ori
    {
       g_groups[n].ticket = trade.ResultOrder();
       AlertEntry(isBuy, entry_price, sl_price, tp, lot);
-      Print("ENTRY: ", (isBuy ? "BUY" : "SELL"), " | Entry=", entry_price, " SL=", sl_price, " TP=", tp, " Lot=", lot);
+      DebugLog(StringFormat("ENTRY: %s | Entry=%.5f SL=%.5f TP=%.5f Lot=%.2f", 
+               isBuy ? "BUY" : "SELL", entry_price, sl_price, tp, lot));
    }
    else
    {
-      Print("FAILED: Trade Error=", trade.ResultRetcode());
+      DebugLog("FAILED: Trade Error=" + IntegerToString(trade.ResultRetcode()));
       g_groups[n].active = false;
    }
 }
@@ -574,7 +620,7 @@ bool GroupAlreadyExists(datetime originTime, bool isBuy)
 }
 
 //====================================================================
-// OnTick - MAIN LOGIC WITH DEBUG
+// OnTick - MAIN LOGIC WITH DEBUG (CURRENT BAR = SHIFT 0)
 //====================================================================
 
 void OnTick()
@@ -587,58 +633,80 @@ void OnTick()
       return;
    }
    
-   // Read M15 Signal
+   // ===== CHECK CURRENT M15 BAR (SHIFT 0) =====
+   DebugLog("--- OnTick Cycle Start ---");
+   
    int m15_signal = 0;
    double m15_top = 0, m15_bottom = 0, m15_tp = 0;
    datetime m15_origin = 0;
    
    string m15_text = "NONE";
-   if(ReadPOISignal(g_hSMC_M15, 1, m15_signal, m15_top, m15_bottom, m15_tp, m15_origin))
+   if(ReadPOISignal(g_hSMC_M15, 0, m15_signal, m15_top, m15_bottom, m15_tp, m15_origin))  // SHIFT 0 = CURRENT
    {
       if(m15_signal == 1)
+      {
          m15_text = StringFormat("BUY | T:%.2f B:%.2f", m15_top, m15_bottom);
+         DebugLog("M15 Signal: BUY detected");
+      }
       else if(m15_signal == 2)
+      {
          m15_text = StringFormat("SELL | T:%.2f B:%.2f", m15_top, m15_bottom);
+         DebugLog("M15 Signal: SELL detected");
+      }
       else
+      {
          m15_text = "NONE";
+         DebugLog("M15 Signal: NONE (signal=0)");
+      }
    }
    else
    {
       m15_text = "ERROR";
+      DebugLog("M15 Signal: ERROR reading buffer");
    }
    
-   // Read H4 Signal
+   // ===== CHECK CURRENT H4 BAR (SHIFT 0) =====
    int h4_signal = 0;
    double h4_top = 0, h4_bottom = 0, h4_tp = 0;
    datetime h4_origin = 0;
    
    string h4_text = "NONE";
-   if(ReadPOISignal(g_hSMC_H4, 0, h4_signal, h4_top, h4_bottom, h4_tp, h4_origin))
+   if(ReadPOISignal(g_hSMC_H4, 0, h4_signal, h4_top, h4_bottom, h4_tp, h4_origin))  // SHIFT 0 = CURRENT
    {
       if(h4_signal == 1)
+      {
          h4_text = StringFormat("BUY | T:%.2f B:%.2f", h4_top, h4_bottom);
+         DebugLog("H4 Signal: BUY detected");
+      }
       else if(h4_signal == 2)
+      {
          h4_text = StringFormat("SELL | T:%.2f B:%.2f", h4_top, h4_bottom);
+         DebugLog("H4 Signal: SELL detected");
+      }
       else
+      {
          h4_text = "NONE";
+         DebugLog("H4 Signal: NONE (signal=0)");
+      }
    }
    else
    {
       h4_text = "ERROR";
+      DebugLog("H4 Signal: ERROR reading buffer");
    }
    
-   // Price Action Analysis
+   // ===== PRICE ACTION ANALYSIS =====
    string pa_text = "WAITING";
    if(m15_signal != 0)
    {
-      PAPattern pattern = AnalyzePriceActionCandle(1);
+      PAPattern pattern = AnalyzePriceActionCandle(0);  // SHIFT 0 = CURRENT BAR
       if(pattern.is_valid)
          pa_text = pattern.pattern_name;
       else
          pa_text = "NO PATTERN";
    }
    
-   // RR Ratio Calculation
+   // ===== RR RATIO CALCULATION =====
    string rr_text = "WAITING";
    double rr_ratio = 0;
    if(m15_signal != 0 && m15_bottom > 0 && m15_top > 0)
@@ -653,9 +721,10 @@ void OnTick()
       
       string rr_status = (rr_ratio >= Target_RR) ? "OK" : "LOW";
       rr_text = StringFormat("%s %.2f:1 (Need: %.1f:1)", rr_status, rr_ratio, Target_RR);
+      DebugLog(StringFormat("RR Ratio: %.2f:1 (Status: %s)", rr_ratio, rr_status));
    }
    
-   // MTF Alignment Check
+   // ===== MTF ALIGNMENT CHECK =====
    string mtf_text = "NOT CHECKED";
    bool mtf_ok = true;
    if(Use_MTF_Alignment)
@@ -665,50 +734,58 @@ void OnTick()
       if(IsPriceInH4POI(isBuy, h4_chk_top, h4_chk_bottom))
       {
          mtf_text = "OK - ALIGNED";
+         DebugLog("MTF Check: ALIGNED");
       }
       else
       {
          mtf_text = "FAIL - NOT ALIGNED";
          mtf_ok = false;
+         DebugLog("MTF Check: NOT ALIGNED");
       }
    }
    else
    {
       mtf_text = "DISABLED";
       mtf_ok = true;
+      DebugLog("MTF Check: DISABLED");
    }
    
-   // Entry Decision
+   // ===== ENTRY DECISION =====
    string entry_reason = "NONE";
    if(m15_signal == 0)
    {
       entry_reason = "NO SIGNAL";
+      DebugLog("Entry Decision: NO M15 SIGNAL");
    }
    else if(!mtf_ok)
    {
       entry_reason = "MTF FAIL";
+      DebugLog("Entry Decision: MTF NOT ALIGNED");
    }
-   else if(!IsPriceActionConfirmed((m15_signal == 1), m15_top, m15_bottom, 1))
+   else if(!IsPriceActionConfirmed((m15_signal == 1), m15_top, m15_bottom, 0))  // SHIFT 0 = CURRENT
    {
       entry_reason = "PA FAIL";
+      DebugLog("Entry Decision: PA NOT CONFIRMED");
    }
    else if(GroupAlreadyExists(m15_origin, (m15_signal == 1)))
    {
       entry_reason = "ALREADY IN";
+      DebugLog("Entry Decision: ALREADY ENTERED");
    }
    else
    {
       entry_reason = "READY";
+      DebugLog("Entry Decision: READY TO ENTER");
    }
    
    // Update Dashboard
    UpdateDashboard(m15_text, h4_text, pa_text, rr_text, mtf_text, entry_reason);
    
-   // Execute Trade Logic
+   // ===== EXECUTE TRADE =====
    if(m15_signal != 0 && m15_origin != 0 && entry_reason == "READY")
    {
       bool isBuy = (m15_signal == 1);
-      PAPattern pattern = AnalyzePriceActionCandle(1);
+      PAPattern pattern = AnalyzePriceActionCandle(0);  // SHIFT 0 = CURRENT BAR
       AlertSignal(isBuy, pattern.pattern_name, rr_ratio);
       OpenPOITrade(isBuy, m15_top, m15_bottom, m15_tp, m15_origin);
       g_lastSignalProcessed = m15_origin;
